@@ -1,0 +1,45 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+library(rvest) # web scraping
+library(quantmod) # donwload stock data
+library(dplyr)
+```
+
+Scrape stock symbols in DJIA from wikipedia
+```{r}
+url <- 'https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average'
+# read from wiki page
+tbl <- read_html(url) %>% 
+  html_nodes(css = 'table')
+# convert to df
+tbl <- tbl[2] %>% html_table() %>% as.data.frame()
+```
+
+Download stock data from yahoo.com
+```{r}
+# create new environment for stock data
+quotes <- new.env()
+# download stock data to quotes environment
+getSymbols(tbl$Symbol, src = 'yahoo', from = '2015-01-01', env = quotes)
+
+```
+Create xts object with closing prices of the 30 stocks in DJIA
+```{r}
+# store stock data in quotes enirnoment in a list
+q_list <- eapply(quotes, "[") 
+
+# store the 1st stock's closing price in stocks
+stocks <- q_list[[1]][,4] # 4th column is closing price
+
+# 2nd to 30th stock in the list. closing price. 
+for (i in 2:length(q_list)) {
+  stocks <- cbind(stocks, q_list[[i]][,4])
+}
+```
+
+
+
