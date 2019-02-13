@@ -35,7 +35,7 @@ getSymbols(tbl$Symbol, src = 'yahoo', from = '2015-01-01', env = quotes)
 
 Create xts object with closing prices of the 30 stocks in DJIA
 ```{r}
-# store stock data in quotes enirnoment in a list
+# store stock data in quotes enirnoment into a list
 q_list <- eapply(quotes, "[") 
 
 # store the 1st stock's closing price in stocks
@@ -58,7 +58,7 @@ Convert prices to returns
 # convert prices to returns
 # doesn't seem accurate. not sure what type of returns it's calculating
 # its slightly off from arithmetic or log returns. just going with it bc
-# prof used it. but validate it in the future if you use it again
+# prof used it. verify it in the future if you use it again
 stocks_r <- ROC(stocks)
 # drop fist row bc its NA from returns calculation
 stocks_r <- stocks_r[2:nrow(stocks_r)]
@@ -70,12 +70,13 @@ stocks_r <- stocks_r[2:nrow(stocks_r)]
 
 ARCH effect test for the stocks
 ```{r}
-# Test if the volatility is predictable, autocorrelations exits
+# Test if the volatility is predictable, ie autocorrelations exits
 # Null Hypothesis: all coefficients in a ARCH model is equal zero
 
 # Arch test for the first stock 
 # arch.test expects an arima object
 # function doesn't allow you to choose the lag
+# first row from arch.test contains results from testing lag 1-4
 arch_test <- arch.test(arima(stocks_r[,1], order = c(0,0,0)), output = F) %>% 
   as.data.frame() %>% slice(1)
 names(arch_test) <- c("order", "PQ_Stat", "p_value_PQ", "LM_Stat", "p_value_LM")
@@ -93,7 +94,7 @@ names(arch_test_temp) <- c("order", "PQ_Stat", "p_value_PQ",
 arch_test <- bind_rows(arch_test, arch_test_temp)
 }
 
-# add a columns for the name of the stock associated with the test result
+# add a column for the name of the stock associated with the test result
 arch_test$stock <- names(stocks_r)
 
 # Arrange by p value, smallest first
@@ -116,6 +117,7 @@ arch_test2 <- data.frame(stock = names(stocks_r), p_value = p_values) %>%
   mutate(stock = as.character(stock))
 # arrange by p-value
 arch_test2 <- arch_test2 %>% arrange(p_values)
+
 # results are different from the aTSA package. checked p-values in SAS for top 
 # 5 ones with lowest p-value and they are all below .0001
 # will use these results bc it's testing the first lag rather than 1-4
@@ -142,6 +144,7 @@ fit_stat_df <- data.frame(AIC = NA, BIC = NA, SIC = NA, HQIC = NA,
 # distribution types (normal, t, sym normal, sym t)
 dists <- c('norm', 'std', 'snorm', 'sstd')
 
+# create 4 types of garch(1,1) modeles for each stock and save results in a df
 for(stock in names(top5_stocks_r)){
   for(dist in dists) {
     # fit garch model with specified dist
@@ -203,6 +206,27 @@ sd_forecast <- data.frame(XOM = predict(XOM_fit, n.ahead = 5) %>%
                             pull(standardDeviation),
                           MSFT = predict(MSFT_fit, n.ahead = 5) %>% 
                             pull(standardDeviation))
+```
+Median forecasted variance and returns
+```{r}
+# compute forecasted variance
+var_forecast <- sd_forecast * sd_forecast
+
+# df of median forecasted variance for each stock
+med_var <- apply(var_forecast,2, median) %>% 
+  as.matrix() %>% t() %>% as.data.frame()
+
+# df of median returns for each stock
+med_r <- top5_stocks_r %>% apply(2,median) %>% 
+  as.matrix() %>% t() %>% as.data.frame()
+# remove .Close from column names
+names(med_r) <- names(med_r) %>% str_replace(".Close", "")
+
+# df of median forecasted variance and historical median returns
+var_r <- bind_rows(med_var, med_r)
+var_r$measure <- c('variance', 'return')
+
+# var_r %>% gather(key = stock, value = v, -measure)
 ```
 
 
