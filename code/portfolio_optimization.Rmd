@@ -1,0 +1,168 @@
+---
+title: "Portfolio Optimization"
+output: html_document
+---
+
+Load libraries
+```{r}
+library(rvest) # web scraping
+library(quantmod) # donwload stock data
+library(dplyr) # data manipulation
+library(TTR) # calculate returns
+library(aTSA) # test arch effects
+library(fDMA)# test arch effects
+library(stringr) # string manipulation
+library(fGarch) # garchFit
+```
+
+Scrape stock symbols in DJIA from wikipedia.com
+```{r}
+url <- 'https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average'
+# read from wiki page
+tbl <- read_html(url) %>% 
+  html_nodes(css = 'table')
+# convert to df
+tbl <- tbl[2] %>% html_table() %>% as.data.frame()
+```
+
+Download stock data from yahoo.com
+```{r}
+# create new environment for stock data
+quotes <- new.env()
+# download stock data to quotes environment
+getSymbols(tbl$Symbol, src = 'yahoo', from = '2015-01-01', env = quotes)
+```
+
+Create xts object with closing prices of the 30 stocks in DJIA
+```{r}
+# store stock data in quotes enirnoment in a list
+q_list <- eapply(quotes, "[") 
+
+# store the 1st stock's closing price in stocks
+stocks <- q_list[[1]][,4] # 4th column is closing price
+
+# 2nd to 30th stock in the list and just keep closing price. 
+for (i in 2:length(q_list)) {
+  stocks <- cbind(stocks, q_list[[i]][,4])
+}
+
+# subset to keep specified data range
+stocks <- stocks["2017-02-01/2019-2-8"]
+
+# saveRDS(stocks, "../data/stocks.RDS")
+# stocks <- readRDS("../data/stocks.RDS")
+```
+
+Convert prices to returns
+```{r}
+# convert prices to returns
+# doesn't seem accurate. not sure what type of returns it's calculating
+# its slightly off from arithmetic or log returns. just going with it bc
+# prof used it but validate it in the future if you use it again
+stocks_r <- ROC(stocks)
+# drop fist row bc its NA from returns calculation
+stocks_r <- stocks_r[2:nrow(stocks_r)]
+
+# stocks_r2 <- stocks_r
+# names(stocks_r2) <- names(stocks_r2) %>% str_replace_all("\\.", "_")
+# write.csv(stocks_r2, "../data/stocks_r.csv")
+```
+
+ARCH effect test for the stocks
+```{r}
+# Test if the volatility is predictable, autocorrelations exits
+# Null Hypothesis: all coefficients in a ARCH model is equal zero
+
+# Arch test for the first stock 
+# arch.test expects an arima object
+# function doesn't allow you to choose the lag
+arch_test <- arch.test(arima(stocks_r[,1], order = c(0,0,0)), output = F) %>% 
+  as.data.frame() %>% slice(1)
+names(arch_test) <- c("order", "PQ_Stat", "p_value_PQ", "LM_Stat", "p_value_LM")
+
+# loop through the rest of the stocks and store results from arch effect test
+# into a DF
+for(i in 2:ncol(stocks_r)){
+arch_test_temp <- arch.test(arima(stocks_r[,i], order = c(0,0,0)), 
+                            output = F) %>% 
+  as.data.frame() %>% slice(1)
+
+names(arch_test_temp) <- c("order", "PQ_Stat", "p_value_PQ", 
+                           "LM_Stat", "p_value_LM")
+
+arch_test <- bind_rows(arch_test, arch_test_temp)
+}
+
+# add a columns for the name of the stock associated with the test result
+arch_test$stock <- names(stocks_r)
+
+# Arrange by p value, smallest first
+arch_test <- arch_test %>% arrange(p_value_LM)
+
+arch_test
+```
+
+ARCH effect test for the stocks using fDMA package
+```{r}
+p_values <- c()
+# loop through stocks test for arch effect on first lag. 
+# save p value in a vector
+for(i in 1:ncol(stocks_r)){
+  p_values_temp <- archtest(stocks_r[,i] %>% as.numeric(), lag =1)
+  p_values <- c(p_values, p_values_temp$p.value)
+}
+# create a data frame with the p-value and associated stock name
+arch_test2 <- data.frame(stock = names(stocks_r), p_value = p_values) %>%
+  mutate(stock = as.character(stock))
+# arrange by p-value
+arch_test2 <- arch_test2 %>% arrange(p_values)
+# results are different from the aTSA package. checked p-values in SAS for top 
+# 5 ones with lowest p-value and they are all below .0001
+# will use these results bc it's testing the first lag rather than 1-4
+arch_test2
+
+
+
+
+```
+Select top 5 stocks based on smallest p value from LM test
+```{r}
+# create vector of names of top 5 stocks
+top5_names <- arch_test2 %>% slice(1:5) %>% pull(stock)
+# select top 5 stocks  
+top5_stocks_r <- stocks_r[,top5_names]
+```
+
+```{r}
+for(i in 1:ncol(top5_stocks_r)){
+  fit <- garchFit(formula= ~ garch(1,1), data=stocks_r[,i],
+                    cond.dist="norm", include.mean = FALSE)
+  fit@fit$ics %>% as.matrix() %>% t()
+}
+```
+
+
+
+```{r}
+GARCH.N <- garchFit(formula= ~ garch(1,1), data=stocks_r[,1],
+                    cond.dist="norm", include.mean = FALSE)
+summary(GARCH.N)
+GARCH.N %>% str()
+GARCH.N@method
+
+GARCH.N@fit$ics
+
+GARCH.t <- garchFit(formula= ~ garch(1,1), data=stocks$msft_r[-1], 
+                    cond.dist="std", include.mean = FALSE)
+summary(GARCH.t)
+```
+
+
+```{r}
+GARCH.N@fit$ics %>% as.matrix() %>% t() %>% as.data.frame()
+```
+
+```{r}
+
+```
+
