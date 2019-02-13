@@ -222,18 +222,22 @@ MSFT_fit <- garchFit(formula= ~ garch(1,1), data=stocks_r[,'MSFT.Close'],
 
 ```
 
-
-
-
+5 day volatility forecast
 ```{r}
-msft_fit@fit$par['alpha1']
-msft_fit@fit$par['beta1']
+# create df with 5 day forecast of volatitlity for each stock
+sd_forecast <- data.frame(XOM = predict(XOM_fit, n.ahead = 5) %>%   
+                            pull(standardDeviation),
+                          UTX = predict(UTX_fit, n.ahead = 5) %>% 
+                            pull(standardDeviation),
+                          MRK = predict(MRK_fit, n.ahead = 5) %>% 
+                            pull(standardDeviation),
+                          CVX = predict(CVX_fit, n.ahead = 5) %>% 
+                            pull(standardDeviation),
+                          MSFT = predict(MSFT_fit, n.ahead = 5) %>% 
+                            pull(standardDeviation))
 ```
 
 
-```{r}
-GARCH.N@fit$ics %>% as.matrix() %>% t() %>% as.data.frame()
-```
 
 ```{r}
 
