@@ -58,7 +58,7 @@ Convert prices to returns
 # convert prices to returns
 # doesn't seem accurate. not sure what type of returns it's calculating
 # its slightly off from arithmetic or log returns. just going with it bc
-# prof used it but validate it in the future if you use it again
+# prof used it. but validate it in the future if you use it again
 stocks_r <- ROC(stocks)
 # drop fist row bc its NA from returns calculation
 stocks_r <- stocks_r[2:nrow(stocks_r)]
@@ -121,9 +121,6 @@ arch_test2 <- arch_test2 %>% arrange(p_values)
 # will use these results bc it's testing the first lag rather than 1-4
 arch_test2
 
-
-
-
 ```
 Select top 5 stocks based on smallest p value from LM test
 ```{r}
@@ -142,67 +139,38 @@ Fit Garch Models
 fit_stat_df <- data.frame(AIC = NA, BIC = NA, SIC = NA, HQIC = NA, 
                           loglikelihood = NA, model = NA, stock = NA, 
                           alpha = NA, beta = NA)
+# distribution types (normal, t, sym normal, sym t)
+dists <- c('norm', 'std', 'snorm', 'sstd')
 
-# create diff types of GARCH(1,1) models and record fit stats for top5 stocks
-for(i in 1:ncol(top5_stocks_r)){
-  # fit garch model with normal dist
-  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
-                    cond.dist="norm", include.mean = FALSE)
-  # save fit stats (AIC, SBC etc) from model
-  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
-    mutate(loglikelihood = fit@fit$value*-1 %>% unname, model = "garch_n", 
-           stock = names(top5_stocks_r)[i], 
-           alpha = fit@fit$par['alpha1'] %>% unname,
-           beta = fit@fit$par['beta1'] %>% unname)
-  # add fit stats to df
-  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
-  
-  # fit garch model with t-dist
-  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
-                    cond.dist="std", include.mean = FALSE)
-  # save fit stats (AIC, SBC etc) from model
-  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
-    mutate(loglikelihood = fit@fit$value*-1 %>% unname,model = "garch_t", 
-           stock = names(top5_stocks_r)[i],
-           alpha = fit@fit$par['alpha1'] %>% unname,
-           beta = fit@fit$par['beta1'] %>% unname)
-  # add fit stats to df
-  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
-  
-  # fit garch model with skewed normal dist (QGARCH)
-  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
-                    cond.dist="snorm", include.mean = FALSE)
-  # save fit stats (AIC, SBC etc) from model
-  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
-    mutate(loglikelihood = fit@fit$value*-1 %>% unname, model = "qgarch_n", 
-           stock = names(top5_stocks_r)[i],
-           alpha = fit@fit$par['alpha1'] %>% unname,
-           beta = fit@fit$par['beta1'] %>% unname)
-  # add fit stats to df
-  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
-  
-  # fit garch model with skewed t-dist (QGARCH)
-  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
-                    cond.dist="sstd", include.mean = FALSE)
-  # save fit stats (AIC, SBC etc) from model
-  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
-    mutate(loglikelihood = fit@fit$value*-1 %>% unname, model = "qgarch_t", 
-           stock = names(top5_stocks_r)[i],
-           alpha = fit@fit$par['alpha1'] %>% unname,
-           beta = fit@fit$par['beta1'] %>% unname)
-  # add fit stats to df
-  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
+for(stock in names(top5_stocks_r)){
+  for(dist in dists) {
+    # fit garch model with specified dist
+    fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,stock],
+                    cond.dist=dist, include.mean = FALSE)
+    # save fit stats (AIC, SBC etc) from model
+    fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
+      mutate(loglikelihood = fit@fit$value*-1 %>% unname, model = dist, 
+             stock = stock, 
+             alpha = fit@fit$par['alpha1'] %>% unname,
+             beta = fit@fit$par['beta1'] %>% unname)
+    # add fit stats to df
+    fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
+  }
 }
 ```
 
-Fit best model for each stock
-```{r echo = T, results = 'hide'}
+Best model for each stock 
+```{r}
 # Best model for each stock in terms of lowest AIC
 fit_stat_df %>% slice(-1) %>%
   group_by(stock) %>%
   arrange(AIC) %>%
   mutate(rn = row_number()) %>%
   dplyr::filter(rn == 1)
+```
+
+Fit best model for each stock
+```{r echo = T, results = 'hide'}
 
 # fit best model for each stock
 XOM_fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,'XOM.Close'],
@@ -239,7 +207,4 @@ sd_forecast <- data.frame(XOM = predict(XOM_fit, n.ahead = 5) %>%
 
 
 
-```{r}
-
-```
 
