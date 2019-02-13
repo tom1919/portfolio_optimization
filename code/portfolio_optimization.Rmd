@@ -26,7 +26,7 @@ tbl <- tbl[2] %>% html_table() %>% as.data.frame()
 ```
 
 Download stock data from yahoo.com
-```{r}
+```{r echo = T, results = 'hide'}
 # create new environment for stock data
 quotes <- new.env()
 # download stock data to quotes environment
@@ -133,28 +133,101 @@ top5_names <- arch_test2 %>% slice(1:5) %>% pull(stock)
 top5_stocks_r <- stocks_r[,top5_names]
 ```
 
+Fit Garch Models
 ```{r}
+# GARCH model with 1 AR and 1 MA term is typically best. The underlying dist
+# is changed to find a better model
+
+# create a data frame with specified cols for recording stats
+fit_stat_df <- data.frame(AIC = NA, BIC = NA, SIC = NA, HQIC = NA, 
+                          loglikelihood = NA, model = NA, stock = NA, 
+                          alpha = NA, beta = NA)
+
+# create diff types of GARCH(1,1) models and record fit stats for top5 stocks
 for(i in 1:ncol(top5_stocks_r)){
-  fit <- garchFit(formula= ~ garch(1,1), data=stocks_r[,i],
+  # fit garch model with normal dist
+  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
                     cond.dist="norm", include.mean = FALSE)
-  fit@fit$ics %>% as.matrix() %>% t()
+  # save fit stats (AIC, SBC etc) from model
+  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
+    mutate(loglikelihood = fit@fit$value*-1 %>% unname, model = "garch_n", 
+           stock = names(top5_stocks_r)[i], 
+           alpha = fit@fit$par['alpha1'] %>% unname,
+           beta = fit@fit$par['beta1'] %>% unname)
+  # add fit stats to df
+  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
+  
+  # fit garch model with t-dist
+  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
+                    cond.dist="std", include.mean = FALSE)
+  # save fit stats (AIC, SBC etc) from model
+  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
+    mutate(loglikelihood = fit@fit$value*-1 %>% unname,model = "garch_t", 
+           stock = names(top5_stocks_r)[i],
+           alpha = fit@fit$par['alpha1'] %>% unname,
+           beta = fit@fit$par['beta1'] %>% unname)
+  # add fit stats to df
+  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
+  
+  # fit garch model with skewed normal dist (QGARCH)
+  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
+                    cond.dist="snorm", include.mean = FALSE)
+  # save fit stats (AIC, SBC etc) from model
+  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
+    mutate(loglikelihood = fit@fit$value*-1 %>% unname, model = "qgarch_n", 
+           stock = names(top5_stocks_r)[i],
+           alpha = fit@fit$par['alpha1'] %>% unname,
+           beta = fit@fit$par['beta1'] %>% unname)
+  # add fit stats to df
+  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
+  
+  # fit garch model with skewed t-dist (QGARCH)
+  fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,i],
+                    cond.dist="sstd", include.mean = FALSE)
+  # save fit stats (AIC, SBC etc) from model
+  fit_stat <- fit@fit$ics %>% as.matrix() %>% t() %>% as.data.frame() %>%
+    mutate(loglikelihood = fit@fit$value*-1 %>% unname, model = "qgarch_t", 
+           stock = names(top5_stocks_r)[i],
+           alpha = fit@fit$par['alpha1'] %>% unname,
+           beta = fit@fit$par['beta1'] %>% unname)
+  # add fit stats to df
+  fit_stat_df <- bind_rows(fit_stat_df, fit_stat)
 }
+```
+
+Fit best model for each stock
+```{r echo = T, results = 'hide'}
+# Best model for each stock in terms of lowest AIC
+fit_stat_df %>% slice(-1) %>%
+  group_by(stock) %>%
+  arrange(AIC) %>%
+  mutate(rn = row_number()) %>%
+  dplyr::filter(rn == 1)
+
+# fit best model for each stock
+XOM_fit <- garchFit(formula= ~ garch(1,1), data=top5_stocks_r[,'XOM.Close'],
+                    cond.dist="std", include.mean = FALSE)
+
+UTX_fit <- garchFit(formula= ~ garch(1,1), data=stocks_r[,'UTX.Close'],
+                    cond.dist="sstd", include.mean = FALSE)
+
+MRK_fit <- garchFit(formula= ~ garch(1,1), data=stocks_r[,'MRK.Close'],
+                    cond.dist="std", include.mean = FALSE)
+
+CVX_fit <- garchFit(formula= ~ garch(1,1), data=stocks_r[,'CVX.Close'],
+                    cond.dist="sstd", include.mean = FALSE)
+
+MSFT_fit <- garchFit(formula= ~ garch(1,1), data=stocks_r[,'MSFT.Close'],
+                    cond.dist="sstd", include.mean = FALSE)
+
 ```
 
 
 
+
 ```{r}
-GARCH.N <- garchFit(formula= ~ garch(1,1), data=stocks_r[,1],
-                    cond.dist="norm", include.mean = FALSE)
-summary(GARCH.N)
-GARCH.N %>% str()
-GARCH.N@method
-
-GARCH.N@fit$ics
-
-GARCH.t <- garchFit(formula= ~ garch(1,1), data=stocks$msft_r[-1], 
-                    cond.dist="std", include.mean = FALSE)
-summary(GARCH.t)
+msft_fit@fit$par['alpha1']
+msft_fit@fit$par['beta1']
 ```
 
 
