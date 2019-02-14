@@ -13,6 +13,7 @@ library(aTSA) # test arch effects
 library(fDMA)# test arch effects
 library(stringr) # string manipulation
 library(fGarch) # garchFit
+library(tidyr) # data manipulation
 ```
 
 Scrape stock symbols in DJIA from wikipedia.com
@@ -51,15 +52,20 @@ stocks <- stocks["2017-02-01/2019-2-8"]
 
 # saveRDS(stocks, "../data/stocks.RDS")
 # stocks <- readRDS("../data/stocks.RDS")
+stocks_r
 ```
 
 Convert prices to returns
 ```{r}
-# convert prices to returns
-# doesn't seem accurate. not sure what type of returns it's calculating
-# its slightly off from arithmetic or log returns. just going with it bc
-# prof used it. verify it in the future if you use it again
-stocks_r <- ROC(stocks)
+stocks_r <- stocks
+
+# for each stock replace prices with returns (percent changes)
+for(stock in names(stocks_r) ){
+  print(stock)
+  stocks_r[,stock] <- periodReturn(stocks[,stock], 
+                                   period = "daily", type='arithmetic')
+}
+
 # drop fist row bc its NA from returns calculation
 stocks_r <- stocks_r[2:nrow(stocks_r)]
 
@@ -133,7 +139,7 @@ top5_stocks_r <- stocks_r[,top5_names]
 ```
 
 Fit Garch Models
-```{r}
+```{r echo = T, results = 'hide'}
 # GARCH model with 1 AR and 1 MA term is typically best. The underlying dist
 # is changed to find a better model
 
@@ -207,6 +213,7 @@ sd_forecast <- data.frame(XOM = predict(XOM_fit, n.ahead = 5) %>%
                           MSFT = predict(MSFT_fit, n.ahead = 5) %>% 
                             pull(standardDeviation))
 ```
+
 Median forecasted variance and returns
 ```{r}
 # compute forecasted variance
