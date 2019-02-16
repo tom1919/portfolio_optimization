@@ -14,6 +14,9 @@ library(fDMA)# test arch effects
 library(stringr) # string manipulation
 library(fGarch) # garchFit
 library(tidyr) # data manipulation
+library(ggplot2)
+filter <- dplyr::filter
+select <- dplyr::select
 ```
 
 Scrape stock symbols in DJIA from wikipedia.com
@@ -48,11 +51,10 @@ for (i in 2:length(q_list)) {
 }
 
 # subset to keep specified data range
-stocks <- stocks["2017-02-01/2019-2-8"]
+stocks <- stocks["2017-02-01/2019-02-08"]
 
 # saveRDS(stocks, "../data/stocks.RDS")
 # stocks <- readRDS("../data/stocks.RDS")
-stocks_r
 ```
 
 Convert prices to returns
@@ -61,7 +63,6 @@ stocks_r <- stocks
 
 # for each stock replace prices with returns (percent changes)
 for(stock in names(stocks_r) ){
-  print(stock)
   stocks_r[,stock] <- periodReturn(stocks[,stock], 
                                    period = "daily", type='arithmetic')
 }
@@ -83,19 +84,22 @@ ARCH effect test for the stocks
 # arch.test expects an arima object
 # function doesn't allow you to choose the lag
 # first row from arch.test contains results from testing lag 1-4
-arch_test <- arch.test(arima(stocks_r[,1], order = c(0,0,0)), output = F) %>% 
+arch_test <- arch.test(arima(stocks_r[,1], order = c(0,0,0)), output = F) 
+colnames(arch_test) <- c("order", "PQ_Stat", "p_value_PQ", 
+                         "LM_Stat", "p_value_LM") 
+arch_test <- arch_test %>% 
   as.data.frame() %>% slice(1)
-names(arch_test) <- c("order", "PQ_Stat", "p_value_PQ", "LM_Stat", "p_value_LM")
 
 # loop through the rest of the stocks and store results from arch effect test
 # into a DF
 for(i in 2:ncol(stocks_r)){
 arch_test_temp <- arch.test(arima(stocks_r[,i], order = c(0,0,0)), 
-                            output = F) %>% 
-  as.data.frame() %>% slice(1)
+                            output = F) 
 
-names(arch_test_temp) <- c("order", "PQ_Stat", "p_value_PQ", 
+colnames(arch_test_temp) <- c("order", "PQ_Stat", "p_value_PQ", 
                            "LM_Stat", "p_value_LM")
+arch_test_temp <- arch_test_temp %>% 
+  as.data.frame() %>% slice(1)
 
 arch_test <- bind_rows(arch_test, arch_test_temp)
 }
@@ -104,31 +108,36 @@ arch_test <- bind_rows(arch_test, arch_test_temp)
 arch_test$stock <- names(stocks_r)
 
 # Arrange by p value, smallest first
-arch_test <- arch_test %>% arrange(p_value_LM)
+arch_test <- arch_test %>% arrange(desc(LM_Stat))
 
+# results of LM test is inconsistent with PQ test. They're inversely related.
+# Also different than SAS
 arch_test
 ```
 
 ARCH effect test for the stocks using fDMA package
 ```{r}
 p_values <- c()
+stats <- c()
 # loop through stocks test for arch effect on first lag. 
 # save p value in a vector
 for(i in 1:ncol(stocks_r)){
-  p_values_temp <- archtest(stocks_r[,i] %>% as.numeric(), lag =1)
-  p_values <- c(p_values, p_values_temp$p.value)
+  temp <- archtest(stocks_r[,i] %>% as.numeric(), lag =1)
+  p_values <- c(p_values, temp$p.value)
+  stats <- c(stats, temp$statistic)
 }
 # create a data frame with the p-value and associated stock name
-arch_test2 <- data.frame(stock = names(stocks_r), p_value = p_values) %>%
+arch_test2 <- data.frame(stock = names(stocks_r), p_value = p_values,
+                         test_stat = stats) %>%
   mutate(stock = as.character(stock))
 # arrange by p-value
 arch_test2 <- arch_test2 %>% arrange(p_values)
 
 # results are different from the aTSA package. checked p-values in SAS for top 
-# 5 ones with lowest p-value and they are all below .0001
-# will use these results bc it's testing the first lag rather than 1-4
+# 5 ones with lowest p-value using fDMA and they are all below .0001
+# will use these results bc it's testing the first lag rather than 1-4 and is 
+# more consistent with SAS
 arch_test2
-
 ```
 Select top 5 stocks based on smallest p value from LM test
 ```{r}
@@ -233,9 +242,113 @@ names(med_r) <- names(med_r) %>% str_replace(".Close", "")
 var_r <- bind_rows(med_var, med_r)
 var_r$measure <- c('variance', 'return')
 
+# reorder columns to match column order in top_5_stocks_r
+var_r <- var_r %>%
+       select(names(top5_stocks_r) %>% 
+                str_replace("\\..+", ""), measure)
+
 # var_r %>% gather(key = stock, value = v, -measure)
 ```
 
+Covariance matrix with forecasted variance
+```{r }
+# create covarinace matrix of historical returns of top 5 stocks
+cov_mtx <- cov(top5_stocks_r)
+# replace diangonal entries of covariance mtx with zero
+diag(cov_mtx) <- 0
+# create diagonal matrix with forecasted median variance
+var_mtx <- diag(var_r %>% filter(measure == "variance") %>% select(-measure))
+# replace diagonal entries of covariance matrix with forecasted median variance
+# This replaces historical variance with forecasted variance / volatility
+cov_mtx <- cov_mtx + var_mtx 
+```
+
+Optimize portfolio
+```{r}
+# mean returns
+returns = var_r %>% filter(measure == "return") %>% 
+  select(-measure) %>% as.numeric()
+
+model <- list()
+
+# Contraint mtx: 
+# sum of weights = 1
+# weighted sum of returns >= .002503 
+# (0.05% each day for 5 days = 1.0005^5 - 1 = 0.002503)?? or just .0005
+model$A <- matrix(c(rep(1,ncol(cov_mtx)),
+                    returns),
+                  nrow=2,byrow=T)
+# model$A <- rbind(model$A, diag(length(returns)))
+model$sense <- c('=', '>=')
+model$rhs   <- c(1, .0005)
 
 
+# Objective function. minimize risk. aka covariance of weighed sum of stocks
+model$Q     <- cov_mtx
+model$obj   <- c(rep(0,ncol(cov_mtx))) # coeficients for linear term
+model$modelsense="min"
+
+# run optimization
+result <- gurobi(model, list())
+result$status
+
+# proportion to apply to each stock
+result_names = c(names(top5_stocks_r))
+names(result$x) = result_names
+result$x
+
+# minimum risk (std deviation)
+result$objval %>% sqrt()
+
+# expected return
+sum(result$x*returns)
+```
+
+
+```{r}
+result$objval
+```
+
+
+Efficient Frontier
+```{r echo = T, results = 'hide'}
+# minimum risk (variance / volatility) for given level of min return
+
+# vary the minimum return
+min_returns <- c(seq(0.0002, .0013, .0001))
+# why does constriant turn to = instead of >=
+model$sense <- c('=', '>=')
+
+
+ef_return = vector(length = length(min_returns))
+ef_risk = min_returns
+
+for (i in 1:length(min_returns))
+{
+  model$rhs <- c(1, min_returns[i])
+  result <- gurobi(model, list())
+  ef_return[i] = sum(result$x * returns)
+  ef_risk[i] = sqrt(result$objval)
+  
+}
+   
+```
+
+Efficient frontier plot
+```{r}
+ef <- data.frame(risk = ef_risk, return = ef_return*100)
+
+ggplot(ef, aes(x = risk, y = return)) +
+  geom_line(color = "#F7AD50", size = 1.5) +
+  labs(title = "Efficient Frontier",
+       x = "Risk (SD)",
+       y = "Return (%)") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = .5, size = 22, face = "bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=16),
+        axis.line = element_line(colour = "black")) +
+  scale_x_continuous( breaks = c(seq(.007,.013, .0005))) +
+  scale_y_continuous( breaks = c(seq(.06,.13, .01)))
+```
 
