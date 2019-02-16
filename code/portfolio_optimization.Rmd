@@ -15,6 +15,8 @@ library(stringr) # string manipulation
 library(fGarch) # garchFit
 library(tidyr) # data manipulation
 library(ggplot2)
+library(gridExtra)
+library(scales)
 filter <- dplyr::filter
 select <- dplyr::select
 ```
@@ -180,12 +182,64 @@ for(stock in names(top5_stocks_r)){
 Best model for each stock 
 ```{r}
 # Best model for each stock in terms of lowest AIC
-fit_stat_df %>% slice(-1) %>%
+fit_stat_df2 <- fit_stat_df %>% slice(-1) %>%
   group_by(stock) %>%
   arrange(AIC) %>%
   mutate(rn = row_number()) %>%
-  dplyr::filter(rn == 1)
+  dplyr::filter(rn == 1) %>%
+  dplyr::ungroup()
+
+fit_stat_df2
+
+
 ```
+
+Plots for stats of each stock
+```{r}
+fit_stat_df2 <- fit_stat_df2 %>% 
+  mutate(Model = ifelse(model == "std", "t-Garch", "QGarch-t"),
+         stock = str_replace_all(stock, "\\..+", "")) 
+
+# alpha
+a_p <- ggplot(fit_stat_df2, aes(x = reorder(stock, -alpha), y = alpha, fill = Model)) +
+  geom_col() +
+  scale_fill_manual(values=c("#F7AD50", "#3F97D0")) +
+  labs(title = "", x = "", y = "Alpha") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = .5, size = 22, face = "bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=16),
+        axis.line = element_line(colour = "black"),
+        legend.position = "none") 
+
+# Beta
+b_p <- ggplot(fit_stat_df2, aes(x = reorder(stock, -beta), y = beta, fill = Model)) +
+  geom_col() +
+  scale_fill_manual(values=c("#F7AD50", "#3F97D0")) +
+  labs(title = "", x = "", y = "Beta") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = .5, size = 22, face = "bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=16),
+        axis.line = element_line(colour = "black"),
+        legend.position = "none")
+
+# Alpha
+ll_p <- ggplot(fit_stat_df2, aes(x = reorder(stock, -loglikelihood), 
+                         y = loglikelihood, fill = Model)) +
+  geom_col() +
+  scale_fill_manual(values=c("#F7AD50", "#3F97D0")) +
+  labs(title = "", x = "", y = "Log Likelihood") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = .5, size = 22, face = "bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=16),
+        axis.line = element_line(colour = "black"),
+        legend.position = "none") 
+
+grid.arrange(a_p, b_p, ncol=1)  
+```
+
 
 Fit best model for each stock
 ```{r echo = T, results = 'hide'}
@@ -286,6 +340,7 @@ model$rhs   <- c(1, .0005, rep(0, ncol(cov_mtx)))
 
 
 # Objective function. minimize risk. aka covariance of weighed sum of stocks
+# cov(p1r1 + ... + p5r5) where p are weights and r are stock returns
 model$Q     <- cov_mtx
 model$obj   <- c(rep(0,ncol(cov_mtx))) # coeficients for linear term
 model$modelsense="min"
@@ -307,7 +362,33 @@ t(opt_weights) %*% cov_mtx %*% opt_weights %>% sqrt()
 # expected return
 sum(result$x * returns)
 
+weights_df 
+```
 
+```{r}
+weights_df
+```
+
+
+Portfolio weights pie chart
+```{r}
+weights_df <- data.frame(Stock = rownames(opt_weights), 
+                         Weights = opt_weights * 100) %>%
+  mutate(Stock = str_replace_all(Stock, "\\..+", ""))
+
+ggplot(weights_df, aes(x = "", y = Weights, fill = Stock)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  geom_text(aes(label = paste0(round(weights_df$Weights,2), "%")), 
+            position = position_stack(vjust = .5)) +
+  scale_fill_manual(values=c("#F7AD50", "#3F97D0", "tomato1", 
+                             "olivedrab2", "#F26419", "#999999")) +
+  labs(x = NULL, y = NULL, fill = NULL, title = "Portfolio Allocation") + 
+  theme_void() + 
+  theme(axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.title = element_text(hjust = .5, size = 22, face = "bold"))
 ```
 
 
@@ -356,7 +437,7 @@ ggplot(ef, aes(x = risk, y = return)) +
         axis.title=element_text(size=16),
         axis.line = element_line(colour = "black")) +
   scale_x_continuous( breaks = c(seq(.007,.013, .0005))) +
-  scale_y_continuous( breaks = c(seq(.06,.13, .01)))
+  scale_y_continuous( breaks = c(seq(.06,.13, .01))) 
 ```
 actual 5 day return from portfolio
 ```{r}
@@ -368,12 +449,61 @@ day5 <- stocks_5day %>% tail(1) %>% as.numeric()
 return_5day <- (day5 - day1)/day1
 
 #  5 day return from optimized portfolio
-weighted_return <- sum(opt_weights * return_5day)
+weighted_return <- sum(opt_weights * return_5day) * 100
 
 #  5 day return from baseline portfolio of having equal weight in each stock
 equal_weights <- c(rep(.2,5)) %>% as.matrix()
-weighted_return_base <- sum(equal_weights * return_5day)
+weighted_return_base <- sum(equal_weights * return_5day) *100
 ```
+Portfolio growth over 5 days
+```{r}
+# number of each stock to purchase. assuming investment = 100k and u can buy 
+# partial stocks (for illustration purposes)
+allocation <-(t(opt_weights) * 100000) / (stocks_5day %>% 
+                                            head(1)) %>% as.numeric() 
+allocation <- matrix(rep(allocation, 5),  nrow = 5, byrow = T)
+# value of each stock holding
+portfolio_value <- allocation * stocks_5day %>% as.data.frame()
+# total portfolio value
+portfolio_value$total = rowSums(portfolio_value)
+
+
+# number of each stock to purchase for baseline portfolio. 
+# assuming investment = 100k and u can buy partial stocks (for illustration purposes)
+allocation_base <-(t(equal_weights) * 100000) / (stocks_5day %>% 
+                                            head(1)) %>% as.numeric()
+allocation_base <- matrix(rep(allocation_base, 5),  nrow = 5, byrow = T)
+# value of each stock holding
+portfolio_value_base <- allocation_base * stocks_5day %>% as.data.frame()
+# total portfolio value
+portfolio_value_base$total = rowSums(portfolio_value_base)
+```
+
+Portfolio growth chart
+```{r}
+portfolios_5day <- data.frame(Date = rownames(portfolio_value),
+                              Optimized = portfolio_value$total,
+                              Baseline = portfolio_value_base$total) %>%
+  mutate(Date = as.POSIXct(Date))
+
+portfolios_5day <- portfolios_5day %>% 
+  gather(key = Portfolio, value = Amount, -Date)
+
+ggplot(portfolios_5day, aes(x = Date, y = Amount, color = Portfolio)) +
+  geom_line(size = 1.3) +
+  scale_colour_manual(values=c("#F7AD50", "#3F97D0")) +
+  labs(title = "Portfolio Growth",  x = "Date (2019)", 
+       y = "Total Amount ($)") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = .5, size = 22, face = "bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=16),
+        axis.line = element_line(colour = "black"),
+        legend.position = c(0.9, 0.2)) +
+  scale_y_continuous(labels = comma) 
+  
+```
+
 
 actual 5 day risk from portfolio
 ```{r}
@@ -397,10 +527,38 @@ risk_5day_base <- t(equal_weights) %*% cov_mtx_5day %*% equal_weights %>% sqrt()
 ```
 
 ```{r}
-return_5day
+return_5day_df <- data.frame(return = c(weighted_return, weighted_return_base),
+                             portfolio = c("Optimized", "Baseline"))
 
-opt_weights
+risk_5day_df <- data.frame(risk = c(risk_5day , risk_5day_base), 
+                           portfolio = c("Optimized", "Baseline"))
+
+p1 <- ggplot(return_5day_df, aes(x = portfolio, y = return)) +
+  geom_col(fill = "#F7AD50", color = '#3F97D0') +
+  labs(
+       y = "Return (%)",
+       x = '') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = .5, size = 22, face = "bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=16),
+        axis.line = element_line(colour = "black")) +
+  scale_y_continuous( breaks = c(seq(0,4, .75)))
+
+p2 <- ggplot(risk_5day_df, aes(x = portfolio, y = risk)) +
+  geom_col(fill = "#F7AD50", color = '#3F97D0') +
+  labs(y = "Risk (SD)", x = "") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = .5, size = 22, face = "bold"),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=16),
+        axis.line = element_line(colour = "black")) 
+
+grid.arrange(p1, p2, ncol = 2)
 ```
 
 
+```{r}
+
+```
 
