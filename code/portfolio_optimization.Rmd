@@ -51,7 +51,7 @@ for (i in 2:length(q_list)) {
 }
 
 # subset to keep specified data range
-stocks <- stocks["2017-02-01/2019-02-08"]
+stocks2 <- stocks["2017-02-01/2019-02-08"]
 
 # saveRDS(stocks, "../data/stocks.RDS")
 # stocks <- readRDS("../data/stocks.RDS")
@@ -59,11 +59,11 @@ stocks <- stocks["2017-02-01/2019-02-08"]
 
 Convert prices to returns
 ```{r}
-stocks_r <- stocks
+stocks_r <- stocks2
 
 # for each stock replace prices with returns (percent changes)
 for(stock in names(stocks_r) ){
-  stocks_r[,stock] <- periodReturn(stocks[,stock], 
+  stocks_r[,stock] <- periodReturn(stocks2[,stock], 
                                    period = "daily", type='arithmetic')
 }
 
@@ -274,13 +274,15 @@ model <- list()
 # Contraint mtx: 
 # sum of weights = 1
 # weighted sum of returns >= .002503 
+# weight >= 0 (can't be negative)
 # (0.05% each day for 5 days = 1.0005^5 - 1 = 0.002503)?? or just .0005
 model$A <- matrix(c(rep(1,ncol(cov_mtx)),
                     returns),
                   nrow=2,byrow=T)
+model$A <- rbind(model$A, diag(rep(1, ncol(cov_mtx))))
 # model$A <- rbind(model$A, diag(length(returns)))
-model$sense <- c('=', '>=')
-model$rhs   <- c(1, .0005)
+model$sense <- c('=', '>=', rep(">=", ncol(cov_mtx)))
+model$rhs   <- c(1, .0005, rep(0, ncol(cov_mtx)))
 
 
 # Objective function. minimize risk. aka covariance of weighed sum of stocks
@@ -292,16 +294,20 @@ model$modelsense="min"
 result <- gurobi(model, list())
 result$status
 
-# proportion to apply to each stock
+# proportion to put in each stock
 result_names = c(names(top5_stocks_r))
 names(result$x) = result_names
-result$x
+opt_weights <- result$x %>% as.matrix()
 
 # minimum risk (std deviation)
 result$objval %>% sqrt()
+# sqrt of covariance of weighted sum (risk)
+t(opt_weights) %*% cov_mtx %*% opt_weights %>% sqrt()
 
 # expected return
-sum(result$x*returns)
+sum(result$x * returns)
+
+
 ```
 
 
@@ -310,14 +316,15 @@ result$objval
 ```
 
 
-Efficient Frontier
+Efficient Frontier Calculation
 ```{r echo = T, results = 'hide'}
 # minimum risk (variance / volatility) for given level of min return
 
 # vary the minimum return
 min_returns <- c(seq(0.0002, .0013, .0001))
-# why does constriant turn to = instead of >=
-model$sense <- c('=', '>=')
+# why does constriant turn to = instead of >= in prof code.
+# making it = creates an inefficient efficient frontier
+model$sense <- c('=', '>=', rep(">=", ncol(cov_mtx)))
 
 
 ef_return = vector(length = length(min_returns))
@@ -325,10 +332,10 @@ ef_risk = min_returns
 
 for (i in 1:length(min_returns))
 {
-  model$rhs <- c(1, min_returns[i])
-  result <- gurobi(model, list())
-  ef_return[i] = sum(result$x * returns)
-  ef_risk[i] = sqrt(result$objval)
+  model$rhs <- c(1, min_returns[i], rep(0,ncol(cov_mtx)))
+  result2 <- gurobi(model, list())
+  ef_return[i] = sum(result2$x * returns)
+  ef_risk[i] = sqrt(result2$objval)
   
 }
    
@@ -351,4 +358,49 @@ ggplot(ef, aes(x = risk, y = return)) +
   scale_x_continuous( breaks = c(seq(.007,.013, .0005))) +
   scale_y_continuous( breaks = c(seq(.06,.13, .01)))
 ```
+actual 5 day return from portfolio
+```{r}
+# 5 days of prices for the 5 stocks in portfolio
+stocks_5day <- stocks["2019-02-11/2019-02-15", names(top5_stocks_r)]
+day1 <- stocks_5day %>% head(1) %>% as.numeric()
+day5 <- stocks_5day %>% tail(1) %>% as.numeric()
+# 5 day return
+return_5day <- (day5 - day1)/day1
+
+#  5 day return from optimized portfolio
+weighted_return <- sum(opt_weights * return_5day)
+
+#  5 day return from baseline portfolio of having equal weight in each stock
+equal_weights <- c(rep(.2,5)) %>% as.matrix()
+weighted_return_base <- sum(equal_weights * return_5day)
+```
+
+actual 5 day risk from portfolio
+```{r}
+# 6 days of price for the 5 stocks in portfolio
+stocks_5day_r <- stocks["2019-02-8/2019-02-15", names(top5_stocks_r)]
+# covert prices to returns
+for(stock in names(stocks_5day_r)){
+  stocks_5day_r[,stock] <- periodReturn(stocks_5day_r[,stock], period = "daily",
+                                type='arithmetic')
+}
+# drop the first row
+stocks_5day_r <- stocks_5day_r %>% tail(5)
+# covariance matrix of 5 days of returns
+cov_mtx_5day <- cov(stocks_5day_r)
+
+# covariance of weighted sum of returns = risk 
+# cov(p1r1 + ... + p5r5) where p are weights and r are returns
+risk_5day <- t(opt_weights) %*% cov_mtx_5day %*% opt_weights %>% sqrt()
+risk_5day_base <- t(equal_weights) %*% cov_mtx_5day %*% equal_weights %>% sqrt()
+
+```
+
+```{r}
+return_5day
+
+opt_weights
+```
+
+
 
