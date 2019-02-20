@@ -34,7 +34,6 @@ proc autoreg data=Stocks ARCHTEST plots(unpack);
 run;
 
 
-/* Test for GARCH Effects and Normality */
 proc autoreg data=Stocks outest = param_estimates;
    model XOM_Close =/ noint garch=(p=1, q=1) dist =t method=ml; 
                             output out=garch_n ht=predicted_var;

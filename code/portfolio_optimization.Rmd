@@ -15,9 +15,9 @@ library(stringr) # string manipulation
 library(fGarch) # garchFit
 library(tidyr) # data manipulation
 library(gurobi) # optimization
-library(ggplot2)
-library(gridExtra)
-library(scales)
+library(ggplot2) # plots
+library(gridExtra) # plots in same grid
+library(scales) # plot axis labels
 filter <- dplyr::filter
 select <- dplyr::select
 ```
@@ -114,7 +114,7 @@ arch_test$stock <- names(stocks_r)
 arch_test <- arch_test %>% arrange(desc(LM_Stat))
 
 # results of LM test is inconsistent with PQ test. They're inversely related.
-# Also different than SAS
+# Also different than SAS. maybe something wrong with the library
 arch_test
 ```
 
@@ -139,7 +139,7 @@ arch_test2 <- arch_test2 %>% arrange(p_values)
 # results are different from the aTSA package. checked p-values in SAS for top 
 # 5 ones with lowest p-value using fDMA and they are all below .0001
 # will use these results bc it's testing the first lag rather than 1-4 and is 
-# more consistent with SAS
+# consistent with SAS
 arch_test2
 ```
 Select top 5 stocks based on smallest p value from LM test
@@ -195,6 +195,7 @@ fit_stat_df2
 
 Plots for parameters / stats of each stock
 ```{r}
+# format model types and stock symbols
 fit_stat_df2 <- fit_stat_df2 %>% 
   mutate(Model = ifelse(model == "std", "t-Garch", "QGarch-t"),
          stock = str_replace_all(stock, "\\..+", "")) 
@@ -325,6 +326,7 @@ var_r <- var_r %>%
 # var_r %>% gather(key = stock, value = v, -measure)
 ```
 
+
 Covariance matrix with forecasted variance
 ```{r }
 # create covarinace matrix of historical returns of top 5 stocks
@@ -348,14 +350,12 @@ model <- list()
 
 # Contraint mtx: 
 # sum of weights = 1
-# weighted sum of returns >= .002503 
+# weighted sum of returns >= 0.0005 (min .05% return per day)
 # weight >= 0 (can't be negative)
-# (0.05% each day for 5 days = 1.0005^5 - 1 = 0.002503)?? or just .0005
 model$A <- matrix(c(rep(1,ncol(cov_mtx)),
-                    returns),
+                  returns),
                   nrow=2,byrow=T)
 model$A <- rbind(model$A, diag(rep(1, ncol(cov_mtx))))
-# model$A <- rbind(model$A, diag(length(returns)))
 model$sense <- c('=', '>=', rep(">=", ncol(cov_mtx)))
 model$rhs   <- c(1, .0005, rep(0, ncol(cov_mtx)))
 
@@ -418,6 +418,7 @@ model$sense <- c('=', '>=', rep(">=", ncol(cov_mtx)))
 ef_return = vector(length = length(min_returns))
 ef_risk = min_returns
 
+# minimize risk for given minimum return
 for (i in 1:length(min_returns))
 {
   model$rhs <- c(1, min_returns[i], rep(0,ncol(cov_mtx)))
@@ -426,7 +427,6 @@ for (i in 1:length(min_returns))
   ef_risk[i] = sqrt(result2$objval)
   
 }
-   
 ```
 
 Efficient frontier plot
