@@ -433,6 +433,11 @@ var_mtx <- diag(var_r %>% filter(measure == "variance") %>% select(-measure))
 cov_mtx <- cov_mtx + var_mtx 
 ```
 
+``` r
+saveRDS(returns, "../data/returns.rds")
+saveRDS(cov_mtx, "../data/cov_mtx.rds")
+```
+
 Optimize portfolio
 
 ``` r
@@ -556,7 +561,7 @@ weights_df <- data.frame(Stock = rownames(opt_weights),
         plot.title = element_text(hjust = .5, size = 22, face = "bold"))
 ```
 
-![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-18-1.png)
+![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-19-1.png)
 
 Efficient Frontier Calculation
 
@@ -564,10 +569,10 @@ Efficient Frontier Calculation
 # minimum risk (variance / volatility) for given level of min return
 
 # vary the minimum return
-min_returns <- c(seq(0.0002, .0013, .0001))
-# why does constriant turn to = instead of >= in prof code.
-# making it = creates an inefficient efficient frontier
-model$sense <- c('=', '>=', rep(">=", ncol(cov_mtx)))
+min_returns <- c(seq(0.00065, .0013, .0001))
+# constraint operators. 
+# return is a binding constraint so use = instead of using >= as before
+model$sense <- c('=', '=', rep(">=", ncol(cov_mtx)))
 
 
 ef_return = vector(length = length(min_returns))
@@ -599,11 +604,11 @@ ggplot(ef, aes(x = risk, y = return)) +
         axis.text=element_text(size=12),
         axis.title=element_text(size=16),
         axis.line = element_line(colour = "black")) +
-  scale_x_continuous( breaks = c(seq(.007,.013, .0005))) +
-  scale_y_continuous( breaks = c(seq(.06,.13, .01))) 
+  scale_x_continuous( breaks = c(seq(.007,.014, .0005))) +
+  scale_y_continuous( breaks = c(seq(.06,.14, .01))) 
 ```
 
-![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-20-1.png)
+![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-21-1.png)
 
 actual 5 day return from portfolio
 
@@ -674,7 +679,7 @@ ggplot(portfolios_5day, aes(x = Date, y = Amount, color = Portfolio)) +
   scale_y_continuous(labels = comma) 
 ```
 
-![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-23-1.png)
+![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-24-1.png)
 
 actual 5 day risk from portfolio
 
@@ -730,4 +735,4 @@ p2 <- ggplot(risk_5day_df, aes(x = portfolio, y = risk)) +
 grid.arrange(p1, p2, ncol = 2)
 ```
 
-![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-25-1.png)
+![](portfolio_optimization_files/figure-markdown_github/unnamed-chunk-26-1.png)
