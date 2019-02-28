@@ -6,7 +6,7 @@ output: rmarkdown::github_document
 Load libraries
 ```{r, warning=FALSE, message=FALSE}
 library(rvest) # web scraping
-library(quantmod) # donwload stock data
+library(quantmod) # donwload stock data and period return
 library(dplyr) # data manipulation
 library(TTR) # calculate returns
 library(aTSA) # test arch effects
